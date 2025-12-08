@@ -175,4 +175,3 @@ Understanding the key directory structure can help with configuration and deploy
 
 Your Java Web App is now running on Apache Tomcat 10 in an AWS EC2 Ubuntu instance\!
 
-Would you like me to provide instructions for setting up Nginx as a reverse proxy?
