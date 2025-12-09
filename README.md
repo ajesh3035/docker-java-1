@@ -176,6 +176,10 @@ Understanding the key directory structure can help with configuration and deploy
 Your Java Web App is now running on Apache Tomcat 10 in an AWS EC2 Ubuntu instance\!
 
 
+
+
+
+
 # GitHub Actions → EC2 (Tomcat) CI/CD — Full Step-by-Step Guide
 
 This document shows a complete, error-free GitHub Actions workflow to **build a Maven Java project (WAR)** and **deploy it automatically to an EC2 instance running Apache Tomcat**. Follow each step exactly. After this, your `git push` to `main` will build the WAR, copy it to EC2, and restart Tomcat.
