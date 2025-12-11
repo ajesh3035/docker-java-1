@@ -693,3 +693,248 @@ This step ensures a `git push` automatically triggers the Jenkins job.
   * **Pipeline as Code:** Always use the `Jenkinsfile` (Pipeline script from SCM).
   * **Access:** Limit Security Group/Firewall rules (open 8080 only to trusted IPs).
 
+
+
+## Step-by-Step Deployment Guide for Java Login App (Docker)
+
+This guide assumes you are starting with a clean EC2 instance and have Docker installed.
+
+-----
+### Step 0: Install Docker on Ubuntu EC2
+
+Before beginning the deployment, you must install Docker on your Ubuntu EC2 instance. Follow these steps.
+
+### 1\. Update the Package Index
+
+Start by updating your local package index to ensure you have access to the latest versions.
+
+```bash
+sudo apt update
+```
+
+### 2\. Install Necessary Packages
+
+Install packages that allow `apt` to use a repository over HTTPS:
+
+```bash
+sudo apt install ca-certificates curl gnupg lsb-release
+```
+
+### 3\. Add Docker's Official GPG Key
+
+Add the official GPG key for the Docker repository to verify the downloaded packages.
+
+```bash
+sudo mkdir -p /etc/apt/keyrings
+curl -fsSL https://download.docker.com/linux/ubuntu/gpg | sudo gpg --dearmor -o /etc/apt/keyrings/docker.gpg
+```
+
+### 4\. Set Up the Docker Repository
+
+Add the Docker repository to your list of sources.
+
+```bash
+echo \
+  "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu \
+  $(lsb_release -cs) stable" | sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
+```
+
+### 5\. Install Docker Engine
+
+Update the package index again with the new repository, and then install Docker Engine, CLI, and Containerd.
+
+```bash
+sudo apt update
+sudo apt install docker-ce docker-ce-cli containerd.io
+```
+
+### 6\. Verify Docker Installation
+
+Check that the Docker service is running correctly.
+
+```bash
+sudo systemctl status docker
+```
+
+You should see an output indicating the status is **`active (running)`**.
+
+### 7\. Run Docker Without `sudo` (Optional but Recommended)
+
+By default, only the root user and users in the `docker` group can run Docker commands. To run Docker without prefixing every command with `sudo`:
+
+1.  **Add your current user to the `docker` group:**
+    ```bash
+    sudo usermod -aG docker $USER
+    ```
+2.  **Apply the new group membership** (you will need to log out and log back in, or simply run the following command to activate the group):
+    ```bash
+    newgrp docker
+    ```
+3.  **Test Docker without `sudo`:**
+    ```bash
+    docker run hello-world
+    ```
+
+If the `hello-world` container runs successfully and prints a message, Docker is correctly installed and configured.
+
+-----
+
+You are now ready to proceed with **Step 1** of the main guide (Verify Project Structure).
+
+Do you want to proceed with **Step 1** of the original deployment guide now?
+### Step 1: Verify Your Project Structure
+
+Ensure your project files are organized correctly. The `Dockerfile` **must** be at the root of your project directory.
+
+| Folder/File | Location | Purpose |
+| :--- | :--- | :--- |
+| `Java-Login-App/` | Root directory (e.g., on your EC2 instance) | Project main directory |
+| `pom.xml` | Inside `Java-Login-App/` | Maven Project Object Model |
+| `src/` | Inside `Java-Login-App/` | Java source code |
+| `Dockerfile` | Inside `Java-Login-App/` (Project Root) | Docker build instructions |
+
+### Step 2: The Multi-Stage Dockerfile
+
+Create a file named `Dockerfile` in the root of your `Java-Login-App/` directory with the **exact** content below. This uses a **multi-stage build** for a smaller final image.
+
+```dockerfile
+########## 1) BUILD STAGE ##########
+# Use a Maven image with JDK 17 to build the WAR file
+FROM maven:3.9.6-eclipse-temurin-17 AS build
+WORKDIR /app
+
+# Copy pom.xml first to cache dependencies (faster subsequent builds)
+COPY pom.xml .
+RUN mvn dependency:go-offline -B
+
+# Copy source and build the final WAR package
+COPY src ./src
+RUN mvn -B clean package -DskipTests
+
+########## 2) RUN STAGE ##########
+# Use a standard Tomcat 10 with JDK 17 for the final runtime
+FROM tomcat:10.1-jdk17
+
+# Remove default Tomcat applications
+RUN rm -rf /usr/local/tomcat/webapps/*
+
+# Copy the generated WAR file from the 'build' stage 
+# and rename it to ROOT.war to make it the default app
+COPY --from=build /app/target/*.war /usr/local/tomcat/webapps/ROOT.war
+
+# Tomcat runs on port 8080 by default
+EXPOSE 8080
+# Command to start Tomcat
+CMD ["catalina.sh", "run"]
+```
+
+> **No Manual `mvn package`:** The WAR file is built automatically *inside* the Docker container during the build process.
+
+### Step 3: Build the Docker Image
+
+Navigate to the project root directory (`Java-Login-App/`) on your EC2 instance and run the build command.
+
+```bash
+docker build -t my-login-app .
+```
+
+  * `-t my-login-app`: Tags the resulting image with the name `my-login-app`.
+  * `.`: Specifies the build context (current directory), where the `Dockerfile` is located.
+
+**Verify the Image:**
+
+```bash
+docker images
+```
+
+You should see an image listed with the repository name `my-login-app`.
+
+### Step 4: Run the Container
+
+The Tomcat server inside the container listens on port **8080**. You must map this to a port on your EC2 host machine.
+
+```bash
+docker run -d --name login-app -p 8080:8080 my-login-app
+```
+
+  * `-d`: Runs the container in detached mode (background).
+  * `--name login-app`: Assigns a name to the running container.
+  * `-p 8080:8080`: Maps the host port `8080` to the container port `8080`.
+  * `my-login-app`: The image to use.
+
+**Verify the Container Status:**
+
+```bash
+docker ps
+```
+
+The output under the `PORTS` column should look like this, confirming the port mapping:
+`0.0.0.0:8080->8080/tcp`
+
+### Step 5: Open the Application
+
+Once the container is running, access your application using the public IP of your EC2 instance.
+
+**Primary Access URL:**
+
+```
+http://<EC2-IP>:8080/pages/login.jsp
+```
+
+#### Option A — Add a Root URL Redirect (`index.jsp` Fix)
+
+If you want the base URL (`http://<EC2-IP>:8080/`) to automatically redirect to your login page, execute the following commands to create an `index.jsp` file inside the running container:
+
+1.  **Enter the container:**
+    ```bash
+    docker exec -it login-app bash
+    ```
+2.  **Create the redirect file:**
+    ```bash
+    cat > /usr/local/tomcat/webapps/ROOT/index.jsp << 'EOF'
+    <% response.sendRedirect("pages/login.jsp"); %>
+    EOF
+    ```
+3.  **Exit the container:**
+    ```bash
+    exit
+    ```
+
+Now, visiting `http://<EC2-IP>:8080/` will redirect you.
+
+### Step 6: EC2 Security Group Check (Crucial\!)
+
+If your container is running but the page won't load from your browser, the **EC2 Security Group** is almost certainly blocking the traffic. You must explicitly open port 8080.
+
+In your AWS Console, navigate to your EC2 instance's Security Group and add an **Inbound Rule**:
+
+| Setting | Value |
+| :--- | :--- |
+| **Type** | `Custom TCP` |
+| **Port range** | `8080` |
+| **Source** | `0.0.0.0/0` (for public access) |
+| **Description** | *Optional: Java Login App* |
+
+### Step 7: Useful Docker Commands
+
+Keep these commands handy for managing your container:
+
+| Task | Command |
+| :--- | :--- |
+| **Stop** the running container | `docker stop login-app` |
+| **Remove** the container (when stopped) | `docker rm login-app` |
+| **Rebuild** the image (after code changes) | `docker build -t my-login-app .` |
+| **Restart** the container | `docker run -d --name login-app -p 8080:8080 my-login-app` |
+| View **Logs** (last 200 lines) | `docker logs login-app -n 200` |
+| **View Running Containers** | `docker ps` |
+
+### Step 8: 1-Minute Troubleshooting
+
+| Symptom | Cause & Fix |
+| :--- | :--- |
+| **404 on `/` (Root URL)** | The application is correctly deployed at `/ROOT/` but your code is at `/pages/login.jsp`. Use the `index.jsp` fix in **Step 5** or directly open `/pages/login.jsp`. |
+| **404 on any page** | The WAR file might not be deployed correctly as `ROOT`. Check the contents of the deployed directory: `docker exec -it login-app ls /usr/local/tomcat/webapps/ROOT` |
+| **Container running but page not loading** | **Security Group Blockage.** Go to **Step 6** and confirm Port 8080 is open to your IP or `0.0.0.0/0`. |
+| **Container repeatedly exiting** | Check the logs for Java or Tomcat errors: `docker logs login-app` |
+
+-----
