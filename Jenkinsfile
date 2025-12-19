@@ -1,51 +1,54 @@
 pipeline {
-  agent any
+    agent any
 
-  tools {
-    jdk 'jdk-17'          // name from Global Tool Config
-    maven 'Maven-3'
-  }
-
-  environment {
-    TOMCAT_HOST = '98.83.34.28'
-    TOMCAT_USER = 'ubuntu'
-    WEBAPPS_DIR = '/opt/tomcat10/webapps/'
-    SSH_CREDENTIALS_ID = 'ec2-ssh'
-  }
-
-  stages {
-    stage('Checkout') {
-      steps {
-        checkout([$class: 'GitSCM', branches: [[name: '*/main']],
-          userRemoteConfigs: [[url: 'https://github.com/Harshitha-Galla5/Java-Login-App.git']]])
-      }
+    environment {
+        DOCKER_IMAGE = "harshitha30galla/java-login-app"
+        DOCKER_CREDS = "dockerhub-creds"
     }
 
-    stage('Build') {
-      steps {
-        sh 'mvn -B clean package -DskipTests'
-        archiveArtifacts artifacts: 'target/*.war', fingerprint: true
-      }
-    }
+    stages {
 
-    stage('Deploy to Tomcat') {
-      steps {
-        sshagent (credentials: [env.SSH_CREDENTIALS_ID]) {
-          sh """
-            scp -o StrictHostKeyChecking=no target/*.war ${TOMCAT_USER}@${TOMCAT_HOST}:${WEBAPPS_DIR}
-            ssh -o StrictHostKeyChecking=no ${TOMCAT_USER}@${TOMCAT_HOST} 'sudo systemctl restart tomcat'
-          """
+        stage('Checkout Code') {
+            steps {
+                git branch: 'main',
+                    url: 'https://github.com/Harshitha-Galla5/Java-Login-App.git'
+            }
         }
-      }
-    }
-  }
 
-  post {
-    success {
-      echo 'Deployed successfully'
+        stage('Build Application') {
+            steps {
+                sh 'mvn clean package'
+            }
+        }
+
+        stage('Build Docker Image') {
+            steps {
+                sh 'docker build -t $DOCKER_IMAGE:latest .'
+            }
+        }
+
+        stage('Push Docker Image') {
+            steps {
+                withCredentials([usernamePassword(
+                    credentialsId: DOCKER_CREDS,
+                    usernameVariable: 'DOCKER_USER',
+                    passwordVariable: 'DOCKER_PASS'
+                )]) {
+                    sh '''
+                      echo $DOCKER_PASS | docker login -u $DOCKER_USER --password-stdin
+                      docker push $DOCKER_IMAGE:latest
+                    '''
+                }
+            }
+        }
+
+        stage('Deploy to Kubernetes') {
+            steps {
+                sh '''
+                  kubectl apply -f k8s/deployment.yaml
+                  kubectl apply -f k8s/service.yaml
+                '''
+            }
+        }
     }
-    failure {
-      echo 'Deployment failed'
-    }
-  }
 }
