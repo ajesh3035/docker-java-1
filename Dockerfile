@@ -1,10 +1,12 @@
-FROM eclipse-temurin:17-jdk
+FROM tomcat:9.0-jdk17
 
-WORKDIR /app
+# Remove default Tomcat apps
+RUN rm -rf /usr/local/tomcat/webapps/*
 
-COPY target/*.war app.war
+# Copy WAR to Tomcat
+COPY target/dptweb-1.0.war /usr/local/tomcat/webapps/ROOT.war
 
 EXPOSE 4002
 
-ENTRYPOINT ["java","-war","app.war"]
+CMD ["catalina.sh", "run"]
 
