@@ -4,7 +4,7 @@ WORKDIR /app
 
 COPY target/*.war app.war
 
-EXPOSE 4001
+EXPOSE 4002
 
 ENTRYPOINT ["java","-war","app.war"]
 
